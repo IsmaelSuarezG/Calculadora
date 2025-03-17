@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calculadora Estadística Interactiva</title>
+  <!-- Tailwind CSS desde CDN -->
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <!-- Chart.js para gráficos -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Plugin de anotaciones para Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.1.0"></script>
+  <!-- jStat para funciones estadísticas -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jstat/1.9.4/jstat.min.js"></script>
+  <!-- XLSX para leer archivos CSV/XLS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body class="bg-gray-100 text-gray-900">
+  <div class="max-w-4xl mx-auto p-4">
+    <h1 class="text-3xl font-bold mb-4">Calculadora Estadística Interactiva</h1>
+    <p class="mb-4">
+      Instrucciones: Haga doble clic en este archivo HTML para abrirlo en su navegador. Use la sección de <strong>Carga de Datos</strong> para ingresar manualmente una lista de números (puede copiarlos y pegarlos sin necesidad de usar comas) o cargar un archivo CSV/XLS. Luego, explore cada análisis en las secciones correspondientes.
+    </p>
+    
+    <!-- Sección de Carga de Datos -->
+    <section class="mb-8 p-4 bg-white rounded shadow">
+      <h2 class="text-2xl font-semibold mb-2">Carga de Datos</h2>
+      <div class="mb-4">
+        <h3 class="text-xl font-medium">Ingreso Manual (Análisis de Percentiles)</h3>
+        <textarea id="manualInput" class="w-full p-2 border rounded" rows="3" placeholder="Ejemplo: 1 2 3 4 5 o 1, 2, 3, 4, 5"></textarea>
+        <div class="mt-2 flex space-x-2">
+          <button id="saveManual" class="bg-blue-500 text-white px-4 py-2 rounded">Guardar Datos Manuales</button>
+          <button id="clearManual" class="bg-red-500 text-white px-4 py-2 rounded">Limpiar Datos Manuales</button>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-xl font-medium">Carga de Archivo CSV/XLS</h3>
+        <input type="file" id="fileInput" accept=".csv, .xls, .xlsx" class="mb-2">
+        <button id="clearFileData" class="mt-2 bg-red-500 text-white px-4 py-2 rounded">Limpiar Datos del Archivo</button>
+        <p id="fileDataInfo" class="text-sm text-gray-600 mt-1">No se han cargado datos de archivo.</p>
+      </div>
+    </section>
+    
+    <!-- Sección de Análisis de Percentiles -->
+    <section class="mb-8 p-4 bg-white rounded shadow">
+      <h2 class="text-2xl font-semibold mb-2">Análisis de Percentiles</h2>
+      <!-- Controles para definir los cortes inferior y superior (trimmed mean) -->
+      <div class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label for="lowerCutSlider" class="block font-medium">
+            Corte Inferior (%): <span id="lowerCutValue">0</span>%
+          </label>
+          <input type="range" id="lowerCutSlider" min="0" max="50" value="0" class="w-full">
+        </div>
+        <div>
+          <label for="upperCutSlider" class="block font-medium">
+            Corte Superior (%): <span id="upperCutValue">0</span>%
+          </label>
+          <input type="range" id="upperCutSlider" min="0" max="50" value="0" class="w-full">
+        </div>
+      </div>
+      <div class="mb-4">
+        <canvas id="bellCurveChart" class="bg-gray-50 p-2 rounded shadow"></canvas>
+      </div>
+      <div id="percentileResult" class="p-4 bg-gray-50 rounded shadow"></div>
+      
+      <!-- Nuevo botón para analizar directamente el percentil 80 empírico -->
+      <div class="mt-4">
+        <button id="analyzeP80" class="bg-purple-500 text-white px-4 py-2 rounded">Analizar Percentil 80 Empírico</button>
+      </div>
+      <div id="p80Result" class="p-4 bg-gray-50 rounded shadow mt-2"></div>
+    </section>
+    
+    <!-- Sección de Análisis de Correlación -->
+    <section class="mb-8 p-4 bg-white rounded shadow">
+      <h2 class="text-2xl font-semibold mb-2">Análisis de Correlación</h2>
+      <div class="mb-4">
+        <label for="variableX" class="block font-medium">Variable X:</label>
+        <select id="variableX" class="w-full p-2 border rounded"></select>
+      </div>
+      <div class="mb-4">
+        <label for="variableY" class="block font-medium">Variable Y:</label>
+        <select id="variableY" class="w-full p-2 border rounded"></select>
+      </div>
+      <button id="analyzeCorrelation" class="bg-green-500 text-white px-4 py-2 rounded mb-4">Calcular Correlación</button>
+      <div class="mb-4">
+        <canvas id="scatterChart" class="bg-gray-50 p-2 rounded shadow"></canvas>
+      </div>
+      <div id="correlationResult" class="p-4 bg-gray-50 rounded shadow"></div>
+    </section>
+  </div>
+  
+  <script>
+    // Variables globales para almacenar datos
+    let manualData = [];
+    let tableData = [];
+    let tableHeaders = [];
+    
+    // Cargar datos manuales desde LocalStorage si existen
+    if(localStorage.getItem('manualData')) {
+      manualData = JSON.parse(localStorage.getItem('manualData'));
+      document.getElementById('manualInput').value = manualData.join(', ');
+    }
+    
+    // Cargar datos de archivo desde LocalStorage si existen (para correlación)
+    if(localStorage.getItem('tableData')) {
+      tableData = JSON.parse(localStorage.getItem('tableData'));
+      tableHeaders = JSON.parse(localStorage.getItem('tableHeaders'));
+      document.getElementById('fileDataInfo').innerText = `Datos cargados: ${tableData.length} filas.`;
+      populateVariableSelectors();
+    }
+    
+    // Guardar datos manuales (separadores: espacios, comas o saltos de línea)
+    document.getElementById('saveManual').addEventListener('click', () => {
+      const input = document.getElementById('manualInput').value;
+      manualData = input.split(/[\s,]+/).map(x => parseFloat(x.trim())).filter(x => !isNaN(x));
+      localStorage.setItem('manualData', JSON.stringify(manualData));
+      alert('Datos manuales guardados correctamente.');
+      updateBellCurveChart();
+    });
+    
+    // Botón para limpiar datos manuales
+    document.getElementById('clearManual').addEventListener('click', () => {
+      manualData = [];
+      localStorage.removeItem('manualData');
+      document.getElementById('manualInput').value = '';
+      updateBellCurveChart();
+      alert('Datos manuales eliminados.');
+    });
+    
+    // Limpiar datos del archivo
+    document.getElementById('clearFileData').addEventListener('click', () => {
+      tableData = [];
+      tableHeaders = [];
+      localStorage.removeItem('tableData');
+      localStorage.removeItem('tableHeaders');
+      document.getElementById('fileDataInfo').innerText = 'No se han cargado datos de archivo.';
+      document.getElementById('variableX').innerHTML = '';
+      document.getElementById('variableY').innerHTML = '';
+    });
+    
+    // Procesar archivo cargado (CSV o XLS/XLSX)
+    document.getElementById('fileInput').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const data = event.target.result;
+        let workbook = XLSX.read(data, {type: 'binary'});
+        let sheetName = workbook.SheetNames[0];
+        let worksheet = workbook.Sheets[sheetName];
+        let jsonData = XLSX.utils.sheet_to_json(worksheet, {header:1});
+        if(jsonData.length > 0) {
+          // Detectar si el archivo contiene una sola columna (para percentiles) o varias (para correlación)
+          const isSingleColumn = jsonData.every(row => row.length <= 1);
+          if(isSingleColumn){
+            // Procesar como datos manuales para percentiles
+            let parsedData = [];
+            // Si el primer valor no es numérico, se asume encabezado
+            if(!isNaN(parseFloat(jsonData[0][0]))){
+              parsedData = jsonData.map(row => parseFloat(row[0]));
+            } else {
+              parsedData = jsonData.slice(1).map(row => parseFloat(row[0]));
+            }
+            parsedData = parsedData.filter(x => !isNaN(x));
+            manualData = parsedData;
+            localStorage.setItem('manualData', JSON.stringify(manualData));
+            document.getElementById('manualInput').value = manualData.join(', ');
+            alert('Datos manuales cargados desde archivo.');
+            updateBellCurveChart();
+          } else {
+            // Procesar como datos para análisis de correlación (se espera encabezado y varias columnas)
+            tableHeaders = jsonData[0];
+            tableData = jsonData.slice(1).map(row => {
+              let obj = {};
+              tableHeaders.forEach((header, index) => {
+                obj[header] = parseFloat(row[index]);
+              });
+              return obj;
+            });
+            localStorage.setItem('tableData', JSON.stringify(tableData));
+            localStorage.setItem('tableHeaders', JSON.stringify(tableHeaders));
+            document.getElementById('fileDataInfo').innerText = `Datos cargados: ${tableData.length} filas.`;
+            populateVariableSelectors();
+          }
+        }
+      };
+      reader.readAsBinaryString(file);
+    });
+    
+    // Actualizar el valor mostrado de los sliders y la gráfica al moverlos
+    document.getElementById('lowerCutSlider').addEventListener('input', () => {
+      document.getElementById('lowerCutValue').innerText = document.getElementById('lowerCutSlider').value;
+      updateBellCurveChart();
+    });
+    document.getElementById('upperCutSlider').addEventListener('input', () => {
+      document.getElementById('upperCutValue').innerText = document.getElementById('upperCutSlider').value;
+      updateBellCurveChart();
+    });
+    
+    // Función para actualizar la gráfica de la campana de Gauss y mostrar resultados del trimmed analysis
+    const bellCtx = document.getElementById('bellCurveChart').getContext('2d');
+    let bellChart;
+    
+    function updateBellCurveChart() {
+      if(manualData.length === 0) {
+        if(bellChart) bellChart.destroy();
+        document.getElementById('percentileResult').innerText = 'No hay datos manuales para calcular la campana de Gauss.';
+        return;
+      }
+      
+      // Cálculos básicos de la distribución
+      const originalMean = jStat.mean(manualData);
+      const std = jStat.stdev(manualData, true); // muestra
+      const originalMedian = jStat.median(manualData);
+      const nOriginal = manualData.length;
+      
+      // Obtener los porcentajes de corte de los sliders
+      const lowerCut = parseFloat(document.getElementById('lowerCutSlider').value);
+      const upperCut = parseFloat(document.getElementById('upperCutSlider').value);
+      
+      // Calcular los umbrales: si no se aplica corte, se usa el mínimo o máximo real
+      let lowerThreshold = lowerCut > 0 ? jStat.normal.inv(lowerCut/100, originalMean, std) : Math.min(...manualData);
+      let upperThreshold = upperCut > 0 ? jStat.normal.inv(1 - upperCut/100, originalMean, std) : Math.max(...manualData);
+      
+      // Filtrar datos según los cortes
+      const trimmedData = manualData.filter(val => val >= lowerThreshold && val <= upperThreshold);
+      const nTrimmed = trimmedData.length;
+      
+      // Calcular promedio y mediana en el subconjunto recortado
+      const adjustedMean = trimmedData.length > 0 ? jStat.mean(trimmedData) : originalMean;
+      const trimmedMedian = trimmedData.length > 0 ? jStat.median(trimmedData) : originalMedian;
+      
+      // Análisis profundo de percentiles (trimmed mean)
+      let analysisText = `
+        Se han eliminado los datos menores a ${lowerThreshold.toFixed(2)} (${lowerCut}%) y mayores a ${upperThreshold.toFixed(2)} (${upperCut}%).
+        <br>Datos originales: ${nOriginal} | Datos tras el recorte: ${nTrimmed}.
+        <br><strong>Promedio Inicial:</strong> ${originalMean.toFixed(2)}.
+        <br><strong>Promedio Ajustado:</strong> ${adjustedMean.toFixed(2)}.
+        <br><strong>Mediana (Original):</strong> ${originalMedian.toFixed(2)} | <strong>Mediana Ajustada:</strong> ${trimmedMedian.toFixed(2)}.
+        <br><br>
+        El análisis de percentiles mediante recorte permite observar el efecto de los valores extremos en la media. Al eliminar un porcentaje de los extremos (inferior y superior), se obtiene una medida de tendencia central más robusta.
+      `;
+      
+      // Mostrar resultados en pantalla para el trimmed analysis
+      document.getElementById('percentileResult').innerHTML = `
+        <strong>Cantidad de datos originales:</strong> ${nOriginal}<br>
+        <strong>Cantidad de datos tras el recorte:</strong> ${nTrimmed}<br>
+        <strong>Promedio Inicial:</strong> ${originalMean.toFixed(2)}<br>
+        <strong>Mediana (Original):</strong> ${originalMedian.toFixed(2)}<br>
+        <strong>Desviación estándar:</strong> ${std.toFixed(2)}<br>
+        <strong>Corte Inferior (${lowerCut}%):</strong> ${lowerThreshold.toFixed(2)}<br>
+        <strong>Corte Superior (${upperCut}%):</strong> ${upperThreshold.toFixed(2)}<br>
+        <strong>Promedio Ajustado:</strong> ${adjustedMean.toFixed(2)}<br>
+        <strong>Mediana Ajustada:</strong> ${trimmedMedian.toFixed(2)}<br>
+        <em>${analysisText}</em>
+      `;
+      
+      // Generar puntos para la curva normal (usando el promedio y std calculados)
+      const xValues = [];
+      const yValues = [];
+      const minX = originalMean - 4 * std;
+      const maxX = originalMean + 4 * std;
+      const step = (maxX - minX) / 100;
+      for(let x = minX; x <= maxX; x += step) {
+        xValues.push(x);
+        yValues.push(jStat.normal.pdf(x, originalMean, std));
+      }
+      
+      // Configurar el conjunto de datos para la gráfica
+      const data = {
+        labels: xValues,
+        datasets: [{
+          label: 'Campana de Gauss',
+          data: xValues.map((x, i) => ({x: x, y: yValues[i]})),
+          borderColor: 'blue',
+          backgroundColor: 'rgba(0, 0, 255, 0.1)',
+          fill: true,
+          showLine: true,
+          pointRadius: 0,
+        }]
+      };
+      
+      // Configurar las anotaciones (líneas verticales)
+      const config = {
+        type: 'scatter',
+        data: data,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              type: 'linear',
+              position: 'bottom',
+              title: { display: true, text: 'Valor' }
+            },
+            y: {
+              title: { display: true, text: 'Densidad' }
+            }
+          },
+          plugins: {
+            annotation: {
+              annotations: {
+                lowerLine: {
+                  type: 'line',
+                  xMin: lowerThreshold,
+                  xMax: lowerThreshold,
+                  borderColor: 'red',
+                  borderWidth: 2,
+                  label: {
+                    content: `Corte Inferior (${lowerCut}%)`,
+                    enabled: true,
+                    position: 'start'
+                  }
+                },
+                upperLine: {
+                  type: 'line',
+                  xMin: upperThreshold,
+                  xMax: upperThreshold,
+                  borderColor: 'red',
+                  borderWidth: 2,
+                  label: {
+                    content: `Corte Superior (${upperCut}%)`,
+                    enabled: true,
+                    position: 'end'
+                  }
+                },
+                // Línea verde para el promedio original
+                meanLine: {
+                  type: 'line',
+                  xMin: originalMean,
+                  xMax: originalMean,
+                  borderColor: 'green',
+                  borderWidth: 2,
+                  label: {
+                    content: "Promedio (Original)",
+                    enabled: true,
+                    position: 'center'
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+      
+      // Crear o actualizar la gráfica
+      if(bellChart) {
+        bellChart.destroy();
+      }
+      document.getElementById('bellCurveChart').height = 300;
+      bellChart = new Chart(bellCtx, config);
+    }
+    
+    // Función para analizar el percentil 80 de forma empírica
+    function analyzeP80() {
+      if(manualData.length === 0) {
+        alert("No hay datos manuales para analizar.");
+        return;
+      }
+      // Calcular el percentil 80 de forma empírica
+      let sortedData = manualData.slice().sort((a, b) => a - b);
+      let n = sortedData.length;
+      let index = Math.floor(0.8 * n);
+      let p80 = sortedData[index];
+      
+      // Filtrar los datos que se encuentran por debajo del percentil 80
+      let subset = sortedData.filter(x => x <= p80);
+      let subsetMean = subset.length > 0 ? jStat.mean(subset) : NaN;
+      let subsetMedian = subset.length > 0 ? jStat.median(subset) : NaN;
+      
+      let analysisText = `
+        <strong>Percentil 80 (Empírico):</strong> ${p80.toFixed(2)}<br>
+        <strong>Datos por debajo del 80º percentil:</strong> ${subset.length} de ${n} (${((subset.length/n)*100).toFixed(2)}%)<br>
+        <strong>Promedio de los datos por debajo del 80º percentil:</strong> ${subsetMean.toFixed(2)}<br>
+        <strong>Mediana de los datos por debajo del 80º percentil:</strong> ${subsetMedian.toFixed(2)}<br>
+        <br>
+        Esto indica que el 80% de los datos se encuentran por debajo de ${p80.toFixed(2)}.
+      `;
+      document.getElementById("p80Result").innerHTML = analysisText;
+      
+      // Si la gráfica ya existe, agregar o actualizar una línea de anotación para el percentil 80 empírico
+      if(bellChart) {
+        bellChart.options.plugins.annotation.annotations.p80Line = {
+          type: 'line',
+          xMin: p80,
+          xMax: p80,
+          borderColor: 'purple',
+          borderWidth: 2,
+          label: {
+            content: "Percentil 80 Empírico",
+            enabled: true,
+            position: 'center'
+          }
+        };
+        bellChart.update();
+      }
+    }
+    
+    // Asignar el evento para el botón "Analizar Percentil 80 Empírico"
+    document.getElementById("analyzeP80").addEventListener("click", analyzeP80);
+    
+    // Función para poblar los selectores de variables (análisis de correlación)
+    function populateVariableSelectors() {
+      if(tableHeaders.length === 0) return;
+      const selectX = document.getElementById('variableX');
+      const selectY = document.getElementById('variableY');
+      selectX.innerHTML = '';
+      selectY.innerHTML = '';
+      tableHeaders.forEach(header => {
+        const optionX = document.createElement('option');
+        optionX.value = header;
+        optionX.innerText = header;
+        selectX.appendChild(optionX);
+        
+        const optionY = document.createElement('option');
+        optionY.value = header;
+        optionY.innerText = header;
+        selectY.appendChild(optionY);
+      });
+    }
+    
+    // Gráfico de dispersión para el análisis de correlación
+    const scatterCtx = document.getElementById('scatterChart').getContext('2d');
+    let scatterChart;
+    
+    // Función para calcular el coeficiente de correlación de Pearson
+    function pearsonCorrelation(x, y) {
+      const n = x.length;
+      const meanX = jStat.mean(x);
+      const meanY = jStat.mean(y);
+      let numerator = 0, denomX = 0, denomY = 0;
+      for(let i = 0; i < n; i++){
+        numerator += (x[i] - meanX) * (y[i] - meanY);
+        denomX += Math.pow(x[i] - meanX, 2);
+        denomY += Math.pow(y[i] - meanY, 2);
+      }
+      return numerator / Math.sqrt(denomX * denomY);
+    }
+    
+    // Función para interpretar el coeficiente de correlación
+    function interpretCorrelation(r) {
+      let interpretation = '';
+      const absR = Math.abs(r);
+      if(absR < 0.3) {
+        interpretation = 'correlación muy débil';
+      } else if(absR < 0.5) {
+        interpretation = 'correlación débil';
+      } else if(absR < 0.7) {
+        interpretation = 'correlación moderada';
+      } else if(absR < 0.9) {
+        interpretation = 'correlación fuerte';
+      } else {
+        interpretation = 'correlación muy fuerte';
+      }
+      return interpretation;
+    }
+    
+    // Calcular y mostrar el análisis de correlación al hacer clic
+    document.getElementById('analyzeCorrelation').addEventListener('click', () => {
+      if(tableData.length === 0) {
+        alert('No hay datos de archivo cargados para análisis de correlación.');
+        return;
+      }
+      const varX = document.getElementById('variableX').value;
+      const varY = document.getElementById('variableY').value;
+      const xValues = tableData.map(row => row[varX]);
+      const yValues = tableData.map(row => row[varY]);
+      
+      // Filtrar puntos numéricos
+      const filtered = xValues.map((x, i) => ({x: x, y: yValues[i]}))
+                                .filter(pt => !isNaN(pt.x) && !isNaN(pt.y));
+      
+      if(filtered.length === 0) {
+        alert('No hay suficientes datos numéricos para calcular la correlación.');
+        return;
+      }
+      
+      const xFiltered = filtered.map(pt => pt.x);
+      const yFiltered = filtered.map(pt => pt.y);
+      const r = pearsonCorrelation(xFiltered, yFiltered);
+      const interpretation = interpretCorrelation(r);
+      
+      document.getElementById('correlationResult').innerHTML = `<strong>Coeficiente de correlación de Pearson:</strong> ${r.toFixed(2)}<br>
+      Esto indica una ${interpretation}.`;
+      
+      // Configurar y dibujar el gráfico de dispersión
+      const scatterData = {
+        datasets: [{
+          label: `Diagrama de dispersión: ${varX} vs ${varY}`,
+          data: filtered,
+          backgroundColor: 'green'
+        }]
+      };
+      
+      const scatterConfig = {
+        type: 'scatter',
+        data: scatterData,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { title: {display: true, text: varX} },
+            y: { title: {display: true, text: varY} }
+          }
+        }
+      };
+      
+      if(scatterChart) {
+        scatterChart.destroy();
+      }
+      document.getElementById('scatterChart').height = 300;
+      scatterChart = new Chart(scatterCtx, scatterConfig);
+    });
+    
+    // Inicializar la gráfica de la campana de Gauss
+    updateBellCurveChart();
+  </script>
+</body>
+</html>
